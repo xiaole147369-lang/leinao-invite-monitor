@@ -326,6 +326,8 @@ def main():
     ap.add_argument("--once", action="store_true", help="只检查一轮就退出")
     ap.add_argument("--interval", type=int, default=None,
                     help="本地轮询间隔秒数(默认300)")
+    ap.add_argument("--loop", type=int, default=0,
+                    help="连续值守N分钟后退出(云端接力模式)")
     ap.add_argument("--test-email", action="store_true",
                     help="发送一封测试邮件验证配置后退出")
     args = ap.parse_args()
@@ -342,9 +344,27 @@ def main():
         sys.exit(0 if ok else 1)
 
     on_cloud = os.environ.get("GITHUB_ACTIONS") == "true"
-    if on_cloud:
+    if on_cloud and args.loop <= 0:
         log("云端单次检查(GitHub Actions)")
         check_cycle()
+        return
+
+    if args.loop > 0:
+        log(f"进入值守模式:连续运行 {args.loop} 分钟,每 {CONFIG['interval_sec']} 秒查一轮,"
+            f"收班后由 workflow 接力下一班")
+        start = time.time()
+        try:
+            check_cycle()
+            while (time.time() - start) / 60 < args.loop:
+                time.sleep(CONFIG["interval_sec"])
+                try:
+                    check_cycle()
+                except Exception as e:
+                    log(f"⚠ 本轮检查出错: {e!r}")
+        except KeyboardInterrupt:
+            log("值守被手动中断。")
+            return
+        log(f"值守 {args.loop} 分钟结束,正常收班。")
         return
 
     log("=" * 62)
