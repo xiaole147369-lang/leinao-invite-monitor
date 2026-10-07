@@ -1,21 +1,21 @@
 name: leinao-invite-monitor
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"   # 每10分钟一轮;想更灵敏改成 */5
-  workflow_dispatch:          # 允许在 Actions 页面手动触发(测试用)
+  repository_dispatch:
+    types: [tick]        # 上一班收班时自动触发下一班(接力)
+  workflow_dispatch:      # 手动启动(只需在部署后点一次)
 
 permissions:
-  contents: write             # 允许回写 state.json / leinao_log.csv
+  contents: write         # 允许回写 state.json / leinao_log.csv 和接力触发
 
 concurrency:
   group: leinao-monitor
-  cancel-in-progress: true    # 上一轮未结束时直接取消,避免堆积
+  cancel-in-progress: false   # 排队串行,不互相取消
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 350   # 留足收尾余量,避免撞上单任务6小时硬上限
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 检查邀请状态(开放即发邮件)
+      - name: 值守约5.5小时(每10分钟查一轮,发现开放立即发邮件)
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_AUTH_CODE: ${{ secrets.SMTP_AUTH_CODE }}
@@ -31,9 +31,10 @@ jobs:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_SSL: ${{ secrets.SMTP_SSL }}
-        run: python leinao_monitor.py --once
+        run: python leinao_monitor.py --loop 330 --interval 600
 
-      - name: 回写状态与日志(同时保持仓库活跃,防止定时任务被停用)
+      - name: 回写状态与日志
+        if: always()
         run: |
           if [ -f leinao_log.csv ]; then
             tail -n 400 leinao_log.csv > leinao_log.tmp && mv leinao_log.tmp leinao_log.csv
@@ -42,3 +43,20 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add state.json leinao_log.csv
           git diff --cached --quiet || (git commit -m "监控状态更新" && git push)
+
+      - name: 接力触发下一班值守
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in 1 2 3; do
+            if curl -sf -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+              -d '{"event_type":"tick"}'; then
+              echo "下一班已触发"; exit 0
+            fi
+            sleep 10
+          done
+          echo "接力触发失败"; exit 1
