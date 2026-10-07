@@ -134,10 +134,18 @@ def load_email_config():
     code = os.environ.get("SMTP_AUTH_CODE", "").strip()
     to = os.environ.get("SMTP_TO", "").strip()
     if user and code and to:
+        # 可选 Secrets 未设置时,workflow 会传入空字符串而非缺失,须兜底
+        host = os.environ.get("SMTP_HOST", "").strip() or "smtp.qq.com"
+        port_s = os.environ.get("SMTP_PORT", "").strip()
+        try:
+            port = int(port_s) if port_s else 465
+        except ValueError:
+            port = 465
+        ssl_s = os.environ.get("SMTP_SSL", "").strip().lower()
         return {
-            "smtp_host": os.environ.get("SMTP_HOST", "smtp.qq.com"),
-            "smtp_port": int(os.environ.get("SMTP_PORT", "465")),
-            "use_ssl": os.environ.get("SMTP_SSL", "true").lower() != "false",
+            "smtp_host": host,
+            "smtp_port": port,
+            "use_ssl": ssl_s != "false" if ssl_s else True,
             "username": user,
             "auth_code": code,
             "to": [x.strip() for x in to.split(",") if x.strip()],
