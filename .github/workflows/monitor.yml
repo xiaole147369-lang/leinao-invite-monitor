@@ -1,0 +1,44 @@
+name: leinao-invite-monitor
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # 每10分钟一轮;想更灵敏改成 */5
+  workflow_dispatch:          # 允许在 Actions 页面手动触发(测试用)
+
+permissions:
+  contents: write             # 允许回写 state.json / leinao_log.csv
+
+concurrency:
+  group: leinao-monitor
+  cancel-in-progress: true    # 上一轮未结束时直接取消,避免堆积
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 检查邀请状态(开放即发邮件)
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_AUTH_CODE: ${{ secrets.SMTP_AUTH_CODE }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SSL: ${{ secrets.SMTP_SSL }}
+        run: python leinao_monitor.py --once
+
+      - name: 回写状态与日志(同时保持仓库活跃,防止定时任务被停用)
+        run: |
+          if [ -f leinao_log.csv ]; then
+            tail -n 400 leinao_log.csv > leinao_log.tmp && mv leinao_log.tmp leinao_log.csv
+          fi
+          git config user.name "leinao-monitor-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json leinao_log.csv
+          git diff --cached --quiet || (git commit -m "监控状态更新 [skip ci]" && git push)
