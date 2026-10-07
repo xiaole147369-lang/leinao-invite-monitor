@@ -41,4 +41,4 @@ jobs:
           git config user.name "leinao-monitor-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add state.json leinao_log.csv
-          git diff --cached --quiet || (git commit -m "监控状态更新 [skip ci]" && git push)
+          git diff --cached --quiet || (git commit -m "监控状态更新" && git push)
